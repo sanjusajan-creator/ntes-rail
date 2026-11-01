@@ -1,12 +1,18 @@
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from ntes import NTESClient
+from ntes.exceptions import NTESError
 import logging
+import os
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Config from environment variables
+NTES_TIMEOUT = int(os.getenv("NTES_TIMEOUT", "30"))
+NTES_RETRIES = int(os.getenv("NTES_RETRIES", "3"))
 
 app = FastAPI(
     title="Indian Railways NTES API",
@@ -22,46 +28,54 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-client = NTESClient(timeout=20, retries=3)
+# Create client with extended timeout for Vercel
+client = NTESClient(timeout=NTES_TIMEOUT, retries=NTES_RETRIES)
 
 
-class TrainSearchResult(BaseModel):
-    TrainNumber: str
-    TrainName: str
-    Source: str
-    Destination: str
-    Days: Optional[str] = None
-
-
-class StationInfo(BaseModel):
-    StationCode: str
-    StationName: str
-    Arrival: Optional[str] = None
-    Departure: Optional[str] = None
-    Day: Optional[int] = None
-    Distance: Optional[int] = None
-    Platform: Optional[str] = None
-
-
-class LiveStatus(BaseModel):
-    TrainNumber: str
-    TrainName: str
-    CurrentStation: Optional[str] = None
-    CurrentStatus: Optional[str] = None
-    Delay: Optional[str] = None
-    LastUpdated: Optional[str] = None
-    Stations: List[StationInfo] = []
-
-
-class PNRStatus(BaseModel):
-    PNR: str
-    TrainNumber: Optional[str] = None
-    TrainName: Optional[str] = None
-    JourneyDate: Optional[str] = None
-    BoardingStation: Optional[str] = None
-    ReservationUpto: Optional[str] = None
-    Status: Optional[str] = None
-    Passengers: List[dict] = []
+def handle_ntes_error(e: Exception, operation: str) -> HTTPException:
+    """Convert NTES errors to appropriate HTTP responses."""
+    error_msg = str(e)
+    logger.error(f"{operation} error: {error_msg}")
+    
+    if "timeout" in error_msg.lower() or "timed out" in error_msg.lower():
+        return HTTPException(
+            status_code=504,
+            detail={
+                "error": "NTES API timeout",
+                "message": "The Indian Railways NTES server did not respond in time. This may be due to network restrictions on Vercel.",
+                "suggestion": "Try again, or deploy to a VPS/Cloud Run for better connectivity.",
+                "operation": operation
+            }
+        )
+    elif "connect" in error_msg.lower() or "connection" in error_msg.lower():
+        return HTTPException(
+            status_code=502,
+            detail={
+                "error": "NTES API connection failed",
+                "message": "Could not connect to Indian Railways NTES server. Vercel's IP ranges may be blocked.",
+                "suggestion": "Deploy to a VPS (DigitalOcean, Railway, Render) or use a proxy.",
+                "operation": operation
+            }
+        )
+    elif "captcha" in error_msg.lower():
+        return HTTPException(
+            status_code=503,
+            detail={
+                "error": "Captcha required",
+                "message": "PNR endpoint requires captcha solving which failed.",
+                "suggestion": "Try again in a few moments.",
+                "operation": operation
+            }
+        )
+    else:
+        return HTTPException(
+            status_code=500,
+            detail={
+                "error": "NTES API error",
+                "message": error_msg,
+                "operation": operation
+            }
+        )
 
 
 @app.get("/")
@@ -70,6 +84,7 @@ async def root():
         "name": "Indian Railways NTES API",
         "version": "1.0.0",
         "description": "Vercel-deployable API for Indian Railways train data",
+        "note": "NTES API may timeout on Vercel due to IP restrictions. For production, deploy to a VPS.",
         "endpoints": {
             "search": "/api/search?q=rajdhani",
             "train_info": "/api/train/12301",
@@ -80,7 +95,19 @@ async def root():
             "pnr": "/api/pnr/1234567890",
             "reservation_chart": "/api/train/12301/chart?date=2025-06-15&from=NDLS&to=BCT",
             "trains_between": "/api/trains/between?from=NDLS&to=BCT",
+            "health": "/health",
         },
+    }
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    return {
+        "status": "ok",
+        "service": "ntes-api",
+        "ntes_timeout": NTES_TIMEOUT,
+        "ntes_retries": NTES_RETRIES,
     }
 
 
@@ -92,8 +119,7 @@ async def search_trains(q: str = Query(..., description="Train number, name, or 
         trains = result.get("Trains", [])
         return {"query": q, "count": len(trains), "trains": trains}
     except Exception as e:
-        logger.error(f"Search error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise handle_ntes_error(e, "search")
 
 
 @app.get("/api/train/{train_no}")
@@ -103,8 +129,7 @@ async def get_train_info(train_no: str):
         result = client.train_info(train_no)
         return result
     except Exception as e:
-        logger.error(f"Train info error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise handle_ntes_error(e, f"train_info({train_no})")
 
 
 @app.get("/api/train/{train_no}/schedule")
@@ -114,8 +139,7 @@ async def get_train_schedule(train_no: str):
         result = client.schedule(train_no)
         return result
     except Exception as e:
-        logger.error(f"Schedule error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise handle_ntes_error(e, f"schedule({train_no})")
 
 
 @app.get("/api/train/{train_no}/live")
@@ -128,8 +152,7 @@ async def get_live_status(
         result = client.live_status(train_no, date)
         return result
     except Exception as e:
-        logger.error(f"Live status error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise handle_ntes_error(e, f"live_status({train_no}, {date})")
 
 
 @app.get("/api/station/{station_code}/arrivals")
@@ -139,8 +162,7 @@ async def get_arrivals(station_code: str):
         result = client.get_arrivals(station_code.upper())
         return {"station": station_code.upper(), "trains": result}
     except Exception as e:
-        logger.error(f"Arrivals error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise handle_ntes_error(e, f"arrivals({station_code})")
 
 
 @app.get("/api/station/{station_code}/departures")
@@ -150,8 +172,7 @@ async def get_departures(station_code: str):
         result = client.get_departures(station_code.upper())
         return {"station": station_code.upper(), "trains": result}
     except Exception as e:
-        logger.error(f"Departures error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise handle_ntes_error(e, f"departures({station_code})")
 
 
 @app.get("/api/pnr/{pnr}")
@@ -161,8 +182,7 @@ async def get_pnr_status(pnr: str):
         result = client.pnr_status(pnr)
         return result
     except Exception as e:
-        logger.error(f"PNR error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise handle_ntes_error(e, f"pnr_status({pnr})")
 
 
 @app.get("/api/train/{train_no}/chart")
@@ -178,8 +198,7 @@ async def get_reservation_chart(
         result = reservation_chart(train_no, date, from_station.upper(), to_station.upper())
         return result
     except Exception as e:
-        logger.error(f"Reservation chart error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise handle_ntes_error(e, f"reservation_chart({train_no}, {date}, {from_station}, {to_station})")
 
 
 @app.get("/api/trains/between")
@@ -193,8 +212,7 @@ async def get_trains_between(
         result = client.trains_between(from_station.upper(), to_station.upper(), train_type)
         return {"from": from_station.upper(), "to": to_station.upper(), "train_type": train_type, "trains": result}
     except Exception as e:
-        logger.error(f"Trains between error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise handle_ntes_error(e, f"trains_between({from_station}, {to_station}, {train_type})")
 
 
 if __name__ == "__main__":
