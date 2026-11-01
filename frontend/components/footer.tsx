@@ -11,7 +11,6 @@ const COLUMNS = [
       { href: "/between", label: "Trains between stations" },
       { href: "/station", label: "Station live board" },
       { href: "/pnr", label: "PNR status" },
-      { href: "/api-docs", label: "API reference" },
     ],
   },
   {

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Github, Menu, X } from "lucide-react";
+import { Menu, X } from "lucide-react";
 import { Logo } from "./logo";
 import { cn } from "@/lib/utils";
 
@@ -65,17 +65,6 @@ export function Navbar() {
         </nav>
 
         <div className="flex items-center gap-2">
-          <a
-            href="https://github.com/x64vbhv/ntes-client"
-            target="_blank"
-            rel="noreferrer"
-            className="btn-ghost hidden !px-3 !py-2 sm:inline-flex"
-            aria-label="Data source on GitHub"
-          >
-            <Github className="h-4 w-4" />
-            <span className="text-xs">Data source</span>
-          </a>
-
           <button
             type="button"
             onClick={() => setOpen((value) => !value)}
