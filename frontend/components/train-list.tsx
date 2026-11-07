@@ -4,7 +4,7 @@ import Link from "next/link";
 import { ArrowRight, Clock3, Radio, TrainFront } from "lucide-react";
 import type { BetweenTrain } from "@/lib/types";
 
-function daysShort(days: string): string {
+function daysShort(days?: string): string {
   if (!days) return "—";
   const normalized = days.trim();
   if (/daily/i.test(normalized)) return "Daily";

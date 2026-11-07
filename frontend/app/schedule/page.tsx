@@ -11,10 +11,10 @@ import { ErrorState } from "@/components/error-state";
 import { EmptyState } from "@/components/empty-state";
 import { CardSkeleton, TimelineSkeleton } from "@/components/skeleton";
 import { getSchedule } from "@/lib/api";
-import type { ScheduleResponse } from "@/lib/types";
+import type { TrainSchedule } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-function ScheduleHeader({ data }: { data: ScheduleResponse }) {
+function ScheduleHeader({ data }: { data: TrainSchedule }) {
   const { train, stations } = data;
   const first = stations[0];
   const last = stations[stations.length - 1];
@@ -100,7 +100,7 @@ function ScheduleContent() {
 
   const [trainNo, setTrainNo] = useState(initialTrain);
   const [date, setDate] = useState(initialDate);
-  const [data, setData] = useState<ScheduleResponse | null>(null);
+  const [data, setData] = useState<TrainSchedule | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const requestRef = useRef(0);
@@ -192,13 +192,13 @@ function ScheduleContent() {
           <div className="space-y-4">
             <ScheduleHeader data={data} />
             <RouteTimeline stations={data.stations} mode="schedule" />
-            {data.train.runningDates.length > 0 ? (
+            {(data.train.runningDates?.length ?? 0) > 0 ? (
               <div className="glass rounded-2xl p-4 sm:p-5">
                 <h3 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/35">
                   Upcoming runs
                 </h3>
                 <div className="mt-3 flex flex-wrap gap-1.5">
-                  {data.train.runningDates.slice(0, 14).map((runDate) => (
+                  {data.train.runningDates?.slice(0, 14).map((runDate) => (
                     <button
                       key={runDate}
                       type="button"

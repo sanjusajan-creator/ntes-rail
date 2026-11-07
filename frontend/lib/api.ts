@@ -1,13 +1,20 @@
 import type {
-  ApiErrorBody,
   ApiEnvelope,
+  ApiErrorBody,
   BetweenResponse,
+  CoachCompositionResponse,
+  CoverageResponse,
+  FareResponse,
   LiveResponse,
+  PlatformsResponse,
   PnrResponse,
-  ScheduleResponse,
+  ProviderHealthResponse,
   SearchResponse,
   StationBoardResponse,
-  TrainInstancesResponse,
+  StationRef,
+  TrainRef,
+  TrainRoute,
+  TrainSchedule,
 } from "./types";
 
 const RAW_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8001";
@@ -71,20 +78,16 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<A
         );
       }
 
-      // A slow first response usually means a waking free instance. Keep it.
       if (elapsed > 8000) {
-        // eslint-disable-next-line no-console
         console.info(`[raillens] slow response (${elapsed}ms) for ${path}`);
       }
 
       return body as ApiEnvelope<T>;
     } catch (error) {
       lastError = error;
-      const isAbort =
-        error instanceof DOMException && error.name === "AbortError";
+      const isAbort = error instanceof DOMException && error.name === "AbortError";
       const isApiError = error instanceof ApiError;
 
-      // Do not retry client-side validation or 4xx errors.
       if (isApiError && error.status >= 400 && error.status < 500) {
         throw error;
       }
@@ -107,11 +110,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<A
       0,
     );
   }
-  throw new ApiError(
-    "Could not reach the API. Check your connection or that the backend is running.",
-    "network_error",
-    0,
-  );
+  throw new ApiError("Could not reach the API. Check your connection or that the backend is running.", "network_error", 0);
 }
 
 export interface SearchOptions {
@@ -120,18 +119,37 @@ export interface SearchOptions {
 }
 
 export async function searchTrains(query: string, options: SearchOptions = {}) {
-  const data = await request<SearchResponse>(
-    `/api/search?q=${encodeURIComponent(query)}`,
-    { retries: 0, timeoutMs: 30000, signal: options.signal },
-  );
+  const data = await request<SearchResponse>(`/api/search?q=${encodeURIComponent(query)}`, {
+    retries: 0,
+    timeoutMs: 30000,
+    signal: options.signal,
+  });
   return data.data;
 }
 
-export async function getTrainInstances(trainNo: string, options: SearchOptions = {}) {
-  const data = await request<TrainInstancesResponse>(
-    `/api/train/${encodeURIComponent(trainNo)}/instances`,
-    { signal: options.signal, retries: options.retries ?? 1 },
-  );
+export async function getTrainInfo(trainNo: string, options: SearchOptions = {}) {
+  const data = await request<{ train: TrainRef } & TrainSchedule>(`/api/train/${encodeURIComponent(trainNo)}`, {
+    signal: options.signal,
+    retries: options.retries ?? 1,
+  });
+  return data.data;
+}
+
+export async function getSchedule(trainNo: string, date?: string, options: SearchOptions = {}) {
+  const query = date ? `?date=${encodeURIComponent(date)}` : "";
+  const data = await request<TrainSchedule>(`/api/train/${encodeURIComponent(trainNo)}/schedule${query}`, {
+    signal: options.signal,
+    retries: options.retries ?? 1,
+  });
+  return data.data;
+}
+
+export async function getRoute(trainNo: string, date?: string, options: SearchOptions = {}) {
+  const query = date ? `?date=${encodeURIComponent(date)}` : "";
+  const data = await request<TrainRoute>(`/api/train/${encodeURIComponent(trainNo)}/route${query}`, {
+    signal: options.signal,
+    retries: options.retries ?? 1,
+  });
   return data.data;
 }
 
@@ -141,22 +159,56 @@ export async function getLiveStatus(
   options: SearchOptions = {},
 ) {
   const query = date ? `?date=${encodeURIComponent(date)}` : "";
-  const data = await request<LiveResponse>(
-    `/api/train/${encodeURIComponent(trainNo)}/live${query}`,
+  const data = await request<LiveResponse>(`/api/train/${encodeURIComponent(trainNo)}/live${query}`, {
+    signal: options.signal,
+    retries: options.retries ?? 1,
+  });
+  return data.data;
+}
+
+export async function getCoaches(trainNo: string, options: SearchOptions = {}) {
+  const data = await request<CoachCompositionResponse>(`/api/train/${encodeURIComponent(trainNo)}/coaches`, {
+    signal: options.signal,
+    retries: options.retries ?? 1,
+  });
+  return data.data;
+}
+
+export async function getFare(
+  trainNo: string,
+  date: string,
+  class_: string,
+  quota: string,
+  options: SearchOptions = {},
+) {
+  const params = new URLSearchParams({ date, class: class_, quota });
+  const data = await request<FareResponse>(
+    `/api/train/${encodeURIComponent(trainNo)}/fare?${params.toString()}`,
     { signal: options.signal, retries: options.retries ?? 1 },
   );
   return data.data;
 }
 
-export async function getSchedule(
-  trainNo: string,
-  date?: string,
-  options: SearchOptions = {},
-) {
-  const query = date ? `?date=${encodeURIComponent(date)}` : "";
-  const data = await request<ScheduleResponse>(
-    `/api/train/${encodeURIComponent(trainNo)}/schedule${query}`,
-    { signal: options.signal, retries: options.retries ?? 1 },
+export async function getPlatforms(trainNo: string, options: SearchOptions = {}) {
+  const data = await request<PlatformsResponse>(`/api/train/${encodeURIComponent(trainNo)}/platforms`, {
+    signal: options.signal,
+    retries: options.retries ?? 1,
+  });
+  return data.data;
+}
+
+export async function getStationByCode(stationCode: string, options: SearchOptions = {}) {
+  const data = await request<StationRef>(`/api/station/${encodeURIComponent(stationCode)}`, {
+    signal: options.signal,
+    retries: options.retries ?? 1,
+  });
+  return data.data;
+}
+
+export async function searchStations(query: string, options: SearchOptions = {}) {
+  const data = await request<{ count: number; stations: StationRef[] }>(
+    `/api/stations/search?q=${encodeURIComponent(query)}`,
+    { retries: 0, timeoutMs: 30000, signal: options.signal },
   );
   return data.data;
 }
@@ -167,7 +219,7 @@ export async function getStationBoard(
   options: SearchOptions = {},
 ) {
   const data = await request<StationBoardResponse>(
-    `/api/station/${encodeURIComponent(stationCode)}?hours=${hours}`,
+    `/api/station/${encodeURIComponent(stationCode)}/live?hours=${hours}`,
     { signal: options.signal, retries: options.retries ?? 1 },
   );
   return data.data;
@@ -192,6 +244,22 @@ export async function getPnrStatus(pnr: string, options: SearchOptions = {}) {
     signal: options.signal,
     retries: options.retries ?? 2,
     timeoutMs: 60000,
+  });
+  return data.data;
+}
+
+export async function getCoverage(options: SearchOptions = {}) {
+  const data = await request<CoverageResponse>(`/api/coverage`, {
+    signal: options.signal,
+    retries: options.retries ?? 1,
+  });
+  return data.data;
+}
+
+export async function getProviderHealth(options: SearchOptions = {}) {
+  const data = await request<ProviderHealthResponse>(`/api/provider/health`, {
+    signal: options.signal,
+    retries: options.retries ?? 1,
   });
   return data.data;
 }

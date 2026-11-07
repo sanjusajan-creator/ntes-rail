@@ -11,36 +11,35 @@ import { RouteTimeline } from "@/components/route-timeline";
 import { ErrorState } from "@/components/error-state";
 import { EmptyState } from "@/components/empty-state";
 import { CardSkeleton, TimelineSkeleton } from "@/components/skeleton";
-import { getLiveStatus, getTrainInstances } from "@/lib/api";
-import type { LiveResponse, TrainInstancesResponse } from "@/lib/types";
+import { getLiveStatus, getSchedule } from "@/lib/api";
+import type { LiveResponse, TrainSchedule } from "@/lib/types";
 import { cn, todayISO } from "@/lib/utils";
 
 function RunChips({
-  instances,
+  runningDates,
   activeDate,
   onPick,
   disabled,
 }: {
-  instances: TrainInstancesResponse["instances"];
+  runningDates: string[];
   activeDate: string;
   onPick: (date: string) => void;
   disabled?: boolean;
 }) {
-  if (instances.length === 0) return null;
+  if (runningDates.length === 0) return null;
   return (
     <div className="flex flex-wrap items-center gap-2">
       <span className="inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.14em] text-white/30">
         <History className="h-3 w-3" /> Run starts
       </span>
-      {instances.slice(0, 4).map((instance) => {
-        const active = activeDate === instance.startDateISO;
+      {runningDates.slice(0, 6).map((d) => {
+        const active = activeDate === d;
         return (
           <button
-            key={instance.startDate}
+            key={d}
             type="button"
             disabled={disabled}
-            onClick={() => onPick(instance.startDateISO)}
-            title={instance.position}
+            onClick={() => onPick(d)}
             className={cn(
               "max-w-[260px] truncate rounded-full border px-2.5 py-1 text-[11px] font-medium transition",
               active
@@ -48,8 +47,7 @@ function RunChips({
                 : "border-white/10 bg-white/[0.03] text-white/45 hover:border-white/20 hover:text-white/75",
             )}
           >
-            {instance.startDate}
-            {instance.status === 2 ? " · done" : ""}
+            {d}
           </button>
         );
       })}
@@ -64,10 +62,10 @@ function LiveContent() {
 
   const [trainNo, setTrainNo] = useState(initialTrain);
   const [date, setDate] = useState(initialDate || todayISO());
-  const [instances, setInstances] = useState<TrainInstancesResponse | null>(null);
+  const [schedule, setSchedule] = useState<TrainSchedule | null>(null);
   const [data, setData] = useState<LiveResponse | null>(null);
   const [loading, setLoading] = useState(false);
-  const [loadingInstances, setLoadingInstances] = useState(false);
+  const [loadingSchedule, setLoadingSchedule] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const requestRef = useRef(0);
   const bootstrapped = useRef(false);
@@ -90,18 +88,18 @@ function LiveContent() {
     }
   }, []);
 
-  const loadInstances = useCallback(async (train: string) => {
+  const loadSchedule = useCallback(async (train: string) => {
     if (!/^\d{4,6}$/.test(train)) return null;
-    setLoadingInstances(true);
+    setLoadingSchedule(true);
     try {
-      const response = await getTrainInstances(train);
-      setInstances(response);
+      const response = await getSchedule(train);
+      setSchedule(response);
       return response;
     } catch {
-      setInstances(null);
+      setSchedule(null);
       return null;
     } finally {
-      setLoadingInstances(false);
+      setLoadingSchedule(false);
     }
   }, []);
 
@@ -111,17 +109,18 @@ function LiveContent() {
     bootstrapped.current = true;
     let cancelled = false;
     (async () => {
-      setLoadingInstances(true);
+      setLoadingSchedule(true);
       try {
-        const response = await getTrainInstances(initialTrain);
+        const response = await getSchedule(initialTrain);
         if (cancelled) return;
-        setInstances(response);
-        const runDate = initialDate || response.suggestedDate || todayISO();
+        setSchedule(response);
+        const runningDates = response.train.runningDates || [];
+        const runDate = initialDate || runningDates[0] || todayISO();
         setDate(runDate);
-        setLoadingInstances(false);
+        setLoadingSchedule(false);
         await loadLive(initialTrain, runDate);
       } catch {
-        if (!cancelled) setLoadingInstances(false);
+        if (!cancelled) setLoadingSchedule(false);
       }
     })();
     return () => {
@@ -132,8 +131,9 @@ function LiveContent() {
 
   const handleSelectTrain = async (train: { number: string }) => {
     setTrainNo(train.number);
-    const response = await loadInstances(train.number);
-    const runDate = response?.suggestedDate || date || todayISO();
+    const response = await loadSchedule(train.number);
+    const runningDates = response?.train.runningDates || [];
+    const runDate = runningDates[0] || date || todayISO();
     setDate(runDate);
     await loadLive(train.number, runDate);
   };
@@ -144,9 +144,10 @@ function LiveContent() {
       setError(new Error("Enter a valid 4-6 digit train number."));
       return;
     }
-    const response = await loadInstances(trainNo);
-    const hasRun = response?.instances.some((instance) => instance.startDateISO === date);
-    const runDate = hasRun ? date : response?.suggestedDate || date;
+    const response = await loadSchedule(trainNo);
+    const runningDates = response?.train.runningDates || [];
+    const hasRun = runningDates.some((d: string) => d === date);
+    const runDate = hasRun ? date : runningDates[0] || date;
     if (runDate !== date) setDate(runDate);
     await loadLive(trainNo, runDate);
   };
@@ -192,20 +193,20 @@ function LiveContent() {
               </button>
             </div>
 
-            {instances ? (
+            {schedule ? (
               <div className="mt-4 border-t border-white/[0.06] pt-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-[11px] text-white/35">
-                    <span className="font-semibold text-white/60">{instances.name}</span> ·{" "}
-                    {instances.source.code} → {instances.destination.code}
+                    <span className="font-semibold text-white/60">{schedule.train.name}</span> ·{" "}
+                    {schedule.train.source.code} → {schedule.train.destination.code}
                   </p>
-                  {loadingInstances ? (
+                  {loadingSchedule ? (
                     <span className="text-[11px] text-white/30">Loading runs…</span>
                   ) : null}
                 </div>
                 <div className="mt-2.5">
                   <RunChips
-                    instances={instances.instances}
+                    runningDates={schedule.train.runningDates || []}
                     activeDate={date}
                     onPick={(value) => void handlePickRun(value)}
                     disabled={loading}

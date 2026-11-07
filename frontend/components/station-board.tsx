@@ -97,7 +97,7 @@ export function StationBoard({
             const tone = delayTone(delay);
             return (
               <li
-                key={`${train.number}-${train.startDate ?? ""}-${train.scheduledArrival ?? ""}-${train.scheduledDeparture ?? ""}`}
+                key={`${train.number}-${train.scheduledArrival ?? ""}-${train.scheduledDeparture ?? ""}`}
                 className="group px-4 py-3.5 transition-colors hover:bg-white/[0.025] sm:px-5"
               >
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

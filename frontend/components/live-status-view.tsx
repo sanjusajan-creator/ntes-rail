@@ -44,8 +44,8 @@ function Stat({
 
 export function LiveStatusView({ data }: { data: LiveResponse }) {
   const { train, run } = data;
-  const tone = delayTone(run.delayMinutes);
-  const progress = Math.min(100, Math.max(0, run.progressPercent));
+  const tone = delayTone(run.delayMinutes ?? 0);
+  const progress = Math.min(100, Math.max(0, run.progressPercent ?? 0));
 
   return (
     <div className="space-y-4">
@@ -161,7 +161,7 @@ export function LiveStatusView({ data }: { data: LiveResponse }) {
             <Stat
               icon={Route}
               label="Stations"
-              value={`${Math.max(run.currentSeq, 0)} of ${run.totalStations}`}
+              value={`${Math.max(run.currentSeq ?? 0, 0)} of ${run.totalStations ?? 0}`}
               accent="mint"
             />
             <Stat
