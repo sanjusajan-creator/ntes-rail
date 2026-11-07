@@ -1,33 +1,23 @@
 export interface ApiEnvelope<T> {
-  ok: boolean;
-  cached?: boolean;
+  status: "SUCCESS" | "STALE_DATA" | "ERROR" | "RATE_LIMITED";
   data: T;
-}
-
-export interface ApiErrorBody {
-  ok: false;
-  error: {
+  error?: {
     code: string;
     message: string;
-    detail?: string;
   };
-}
-
-// Freshness and confidence from RailEngine
-export type Freshness = "LIVE" | "RECENT" | "STALE";
-export type Confidence = "HIGH" | "MEDIUM" | "LOW";
-
-export interface FreshnessMeta {
-  freshness: Freshness;
-  confidence: Confidence;
-  observedAt?: string;
-  source?: string;
+  meta?: {
+    freshness?: {
+      state: "LIVE" | "RECENT" | "STALE";
+      confidence: "HIGH" | "MEDIUM" | "LOW";
+      observedAt?: string;
+      source?: string;
+    };
+  };
 }
 
 export interface StationRef {
   code: string;
   name: string;
-  aliases?: string[];
   lat?: number;
   lon?: number;
   state?: string;
@@ -48,12 +38,10 @@ export interface SearchResult extends TrainRef {
 }
 
 export interface SearchResponse {
-  query: string;
   count: number;
   trains: SearchResult[];
 }
 
-// Train Info / Schedule
 export interface ScheduleStation {
   seq: number;
   code: string;
@@ -81,7 +69,6 @@ export interface TrainSchedule {
   stations: ScheduleStation[];
 }
 
-// Route (with actual times)
 export interface RouteStation {
   seq: number;
   code: string;
@@ -103,7 +90,6 @@ export interface TrainRoute {
   stations: RouteStation[];
 }
 
-// Live Status
 export type StationState = "passed" | "current" | "upcoming" | "at-station" | "departed" | "scheduled";
 
 export interface LiveStation {
@@ -147,18 +133,18 @@ export interface LiveRun {
     speed?: number;
     observedAt: string;
   };
-  freshness?: Freshness;
-  confidence?: Confidence;
+  freshness?: {
+    state: "LIVE" | "RECENT" | "STALE";
+    confidence: "HIGH" | "MEDIUM" | "LOW";
+  };
 }
 
 export interface LiveResponse {
   train: TrainRef;
   run: LiveRun;
   stations: LiveStation[];
-  meta?: FreshnessMeta;
 }
 
-// Station Board
 export interface StationBoardTrain {
   number: string;
   name: string;
@@ -175,8 +161,6 @@ export interface StationBoardTrain {
   platform?: string | null;
   state?: StationState;
   cancelled?: boolean;
-  freshness?: Freshness;
-  confidence?: Confidence;
 }
 
 export interface StationBoardResponse {
@@ -185,7 +169,6 @@ export interface StationBoardResponse {
   trains: StationBoardTrain[];
 }
 
-// Between
 export interface BetweenTrain {
   number: string;
   name: string;
@@ -211,7 +194,6 @@ export interface BetweenResponse {
   trains: BetweenTrain[];
 }
 
-// PNR
 export interface PnrPassenger {
   number: number;
   bookingStatus: string;
@@ -240,7 +222,6 @@ export interface PnrResponse {
   passengers?: PnrPassenger[];
 }
 
-// Coach Composition
 export interface CoachInfo {
   position: number;
   coachNumber: string;
@@ -265,7 +246,6 @@ export interface CoachCompositionResponse {
   }>;
 }
 
-// Fare
 export interface FareBreakdown {
   baseFare: number;
   reservationCharge: number;
@@ -285,7 +265,6 @@ export interface FareResponse {
   breakdown: FareBreakdown;
 }
 
-// Platforms
 export interface PlatformInfo {
   stationCode: string;
   stationName: string;
@@ -297,37 +276,4 @@ export interface PlatformInfo {
 export interface PlatformsResponse {
   train: TrainRef;
   platforms: PlatformInfo[];
-}
-
-// Coverage
-export interface CoverageResponse {
-  capabilities: Record<string, {
-    available: boolean;
-    verified: string;
-    source?: string;
-  }>;
-  stations: {
-    count: number;
-    verified: string;
-  };
-  trains: {
-    count: number;
-    verified: string;
-  };
-}
-
-// Provider Health
-export interface ProviderHealthItem {
-  name: string;
-  state: string;
-  latencyMs?: number;
-  lastSuccess?: string | null;
-  lastFailure?: string | null;
-  errorCount?: number;
-  capabilities?: string[];
-  note?: string;
-}
-
-export interface ProviderHealthResponse {
-  providers: ProviderHealthItem[];
 }
