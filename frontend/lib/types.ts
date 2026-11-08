@@ -4,6 +4,7 @@ export interface ApiEnvelope<T> {
   error?: {
     code: string;
     message: string;
+    detail?: string;
   };
   meta?: {
     freshness?: {
@@ -276,4 +277,35 @@ export interface PlatformInfo {
 export interface PlatformsResponse {
   train: TrainRef;
   platforms: PlatformInfo[];
+}
+
+export interface CoverageResponse {
+  capabilities: Record<string, {
+    available: boolean;
+    verified: string;
+    source?: string;
+  }>;
+  stations: {
+    count: number;
+    verified: string;
+  };
+  trains: {
+    count: number;
+    verified: string;
+  };
+}
+
+export interface ProviderHealthItem {
+  name: string;
+  state: string;
+  latencyMs?: number;
+  lastSuccess?: string | null;
+  lastFailure?: string | null;
+  errorCount?: number;
+  capabilities?: string[];
+  note?: string;
+}
+
+export interface ProviderHealthResponse {
+  providers: ProviderHealthItem[];
 }

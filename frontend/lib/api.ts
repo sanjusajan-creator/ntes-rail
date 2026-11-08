@@ -2,10 +2,12 @@ import type {
   ApiEnvelope,
   BetweenResponse,
   CoachCompositionResponse,
+  CoverageResponse,
   FareResponse,
   LiveResponse,
   PlatformsResponse,
   PnrResponse,
+  ProviderHealthResponse,
   SearchResponse,
   StationBoardResponse,
   StationRef,
@@ -14,12 +16,8 @@ import type {
   TrainSchedule,
 } from "./types";
 
-const RAIL_ENGINE_BASE = "https://railway-engine.apkscope.workers.dev/v1";
-const API_KEY = process.env.NEXT_PUBLIC_RAIL_ENGINE_KEY;
-
-if (!API_KEY) {
-  console.warn("[raillens] NEXT_PUBLIC_RAIL_ENGINE_KEY not set - API calls will fail");
-}
+const RAW_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8001";
+export const API_BASE = RAW_BASE.replace(/\/+$/, "");
 
 export class ApiError extends Error {
   code: string;
@@ -43,23 +41,9 @@ interface RequestOptions {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function mapStatus(status: string): "SUCCESS" | "STALE_DATA" | "ERROR" | "RATE_LIMITED" {
-  switch (status) {
-    case "SUCCESS":
-    case "STALE_DATA":
-    case "RATE_LIMITED":
-      return status;
-    default:
-      return "ERROR";
-  }
-}
-
-async function request<T>(path: string, params?: Record<string, string>, options: RequestOptions = {}): Promise<ApiEnvelope<T>> {
-  const { timeoutMs = 30000, retries = 1, signal } = options;
+async function request<T>(path: string, options: RequestOptions = {}): Promise<ApiEnvelope<T>> {
+  const { timeoutMs = 55000, retries = 1, signal } = options;
   let lastError: unknown = null;
-
-  const url = new URL(`${RAIL_ENGINE_BASE}${path}`);
-  if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
 
   for (let attempt = 0; attempt <= retries; attempt += 1) {
     const controller = new AbortController();
@@ -69,11 +53,8 @@ async function request<T>(path: string, params?: Record<string, string>, options
     const startedAt = Date.now();
 
     try {
-      const response = await fetch(url.toString(), {
-        headers: {
-          Accept: "application/json",
-          "x-api-key": API_KEY || "",
-        },
+      const response = await fetch(`${API_BASE}${path}`, {
+        headers: { Accept: "application/json" },
         signal: controller.signal,
         cache: "no-store",
       });
@@ -86,16 +67,13 @@ async function request<T>(path: string, params?: Record<string, string>, options
         body = null;
       }
 
-      const envelope = body as ApiEnvelope<T> | null;
-
-      if (!response.ok || !envelope || (envelope.status !== "SUCCESS" && envelope.status !== "STALE_DATA")) {
-        const errorCode = envelope?.error?.code || "http_error";
-        const errorMessage = envelope?.error?.message || `Request failed (HTTP ${response.status})`;
+      if (!response.ok || (body && typeof body === "object" && "ok" in body && !(body as { ok: boolean }).ok)) {
+        const errorBody = body as ApiEnvelope<unknown> | null;
         throw new ApiError(
-          errorMessage,
-          errorCode,
+          errorBody?.error?.message || `Request failed (HTTP ${response.status})`,
+          errorBody?.error?.code || "http_error",
           response.status,
-          envelope?.error?.message,
+          errorBody?.error?.detail,
         );
       }
 
@@ -103,7 +81,7 @@ async function request<T>(path: string, params?: Record<string, string>, options
         console.info(`[raillens] slow response (${elapsed}ms) for ${path}`);
       }
 
-      return envelope as ApiEnvelope<T>;
+      return body as ApiEnvelope<T>;
     } catch (error) {
       lastError = error;
       const isAbort = error instanceof DOMException && error.name === "AbortError";
@@ -125,9 +103,9 @@ async function request<T>(path: string, params?: Record<string, string>, options
 
   if (lastError instanceof ApiError) throw lastError;
   if (lastError instanceof DOMException && lastError.name === "AbortError") {
-    throw new ApiError("The request timed out.", "timeout", 0);
+    throw new ApiError("The request timed out. The backend may be waking up - try again in a few seconds.", "timeout", 0);
   }
-  throw new ApiError("Could not reach the API. Check your connection.", "network_error", 0);
+  throw new ApiError("Could not reach the API. Check your connection or that the backend is running.", "network_error", 0);
 }
 
 export interface SearchOptions {
@@ -135,17 +113,17 @@ export interface SearchOptions {
   retries?: number;
 }
 
-export async function searchTrains(query: string, options: SearchOptions = {}): Promise<SearchResponse> {
-  const data = await request<SearchResponse>(`/trains/search`, { q: query }, {
+export async function searchTrains(query: string, options: SearchOptions = {}) {
+  const data = await request<SearchResponse>(`/api/search?q=${encodeURIComponent(query)}`, {
     retries: 0,
-    timeoutMs: 20000,
+    timeoutMs: 30000,
     signal: options.signal,
   });
   return data.data;
 }
 
 export async function getTrainInfo(trainNo: string, options: SearchOptions = {}): Promise<TrainSchedule> {
-  const data = await request<TrainSchedule>(`/train/${encodeURIComponent(trainNo)}/schedule`, {}, {
+  const data = await request<TrainSchedule>(`/api/train/${encodeURIComponent(trainNo)}`, {
     signal: options.signal,
     retries: options.retries ?? 1,
   });
@@ -153,9 +131,8 @@ export async function getTrainInfo(trainNo: string, options: SearchOptions = {})
 }
 
 export async function getSchedule(trainNo: string, date?: string, options: SearchOptions = {}): Promise<TrainSchedule> {
-  const params: Record<string, string> = {};
-  if (date) params.date = date;
-  const data = await request<TrainSchedule>(`/train/${encodeURIComponent(trainNo)}/schedule`, params, {
+  const query = date ? `?date=${encodeURIComponent(date)}` : "";
+  const data = await request<TrainSchedule>(`/api/train/${encodeURIComponent(trainNo)}/schedule${query}`, {
     signal: options.signal,
     retries: options.retries ?? 1,
   });
@@ -163,9 +140,8 @@ export async function getSchedule(trainNo: string, date?: string, options: Searc
 }
 
 export async function getRoute(trainNo: string, date?: string, options: SearchOptions = {}): Promise<TrainRoute> {
-  const params: Record<string, string> = {};
-  if (date) params.date = date;
-  const data = await request<TrainRoute>(`/train/${encodeURIComponent(trainNo)}/route`, params, {
+  const query = date ? `?date=${encodeURIComponent(date)}` : "";
+  const data = await request<TrainRoute>(`/api/train/${encodeURIComponent(trainNo)}/route${query}`, {
     signal: options.signal,
     retries: options.retries ?? 1,
   });
@@ -177,9 +153,8 @@ export async function getLiveStatus(
   date?: string,
   options: SearchOptions = {},
 ): Promise<LiveResponse> {
-  const params: Record<string, string> = {};
-  if (date) params.date = date;
-  const data = await request<LiveResponse>(`/train/${encodeURIComponent(trainNo)}/status`, params, {
+  const query = date ? `?date=${encodeURIComponent(date)}` : "";
+  const data = await request<LiveResponse>(`/api/train/${encodeURIComponent(trainNo)}/live${query}`, {
     signal: options.signal,
     retries: options.retries ?? 1,
   });
@@ -187,7 +162,7 @@ export async function getLiveStatus(
 }
 
 export async function getCoaches(trainNo: string, options: SearchOptions = {}): Promise<CoachCompositionResponse> {
-  const data = await request<CoachCompositionResponse>(`/train/${encodeURIComponent(trainNo)}/coaches`, {}, {
+  const data = await request<CoachCompositionResponse>(`/api/train/${encodeURIComponent(trainNo)}/coaches`, {
     signal: options.signal,
     retries: options.retries ?? 1,
   });
@@ -201,16 +176,16 @@ export async function getFare(
   quota: string,
   options: SearchOptions = {},
 ): Promise<FareResponse> {
-  const data = await request<FareResponse>(`/train/${encodeURIComponent(trainNo)}/fare`, {
-    date,
-    class: class_,
-    quota,
-  }, { signal: options.signal, retries: options.retries ?? 1 });
+  const params = new URLSearchParams({ date, class: class_, quota });
+  const data = await request<FareResponse>(
+    `/api/train/${encodeURIComponent(trainNo)}/fare?${params.toString()}`,
+    { signal: options.signal, retries: options.retries ?? 1 },
+  );
   return data.data;
 }
 
 export async function getPlatforms(trainNo: string, options: SearchOptions = {}): Promise<PlatformsResponse> {
-  const data = await request<PlatformsResponse>(`/train/${encodeURIComponent(trainNo)}/platforms`, {}, {
+  const data = await request<PlatformsResponse>(`/api/train/${encodeURIComponent(trainNo)}/platforms`, {
     signal: options.signal,
     retries: options.retries ?? 1,
   });
@@ -218,7 +193,7 @@ export async function getPlatforms(trainNo: string, options: SearchOptions = {})
 }
 
 export async function getStationByCode(stationCode: string, options: SearchOptions = {}): Promise<StationRef> {
-  const data = await request<StationRef>(`/station/${encodeURIComponent(stationCode)}`, {}, {
+  const data = await request<StationRef>(`/api/station/${encodeURIComponent(stationCode)}`, {
     signal: options.signal,
     retries: options.retries ?? 1,
   });
@@ -226,11 +201,10 @@ export async function getStationByCode(stationCode: string, options: SearchOptio
 }
 
 export async function searchStations(query: string, options: SearchOptions = {}): Promise<{ count: number; stations: StationRef[] }> {
-  const data = await request<{ count: number; stations: StationRef[] }>(`/stations/search`, { q: query }, {
-    retries: 0,
-    timeoutMs: 20000,
-    signal: options.signal,
-  });
+  const data = await request<{ count: number; stations: StationRef[] }>(
+    `/api/stations/search?q=${encodeURIComponent(query)}`,
+    { retries: 0, timeoutMs: 30000, signal: options.signal },
+  );
   return data.data;
 }
 
@@ -239,9 +213,10 @@ export async function getStationBoard(
   hours = 2,
   options: SearchOptions = {},
 ): Promise<StationBoardResponse> {
-  const data = await request<StationBoardResponse>(`/station/${encodeURIComponent(stationCode)}/live`, {
-    hours: String(hours),
-  }, { signal: options.signal, retries: options.retries ?? 1 });
+  const data = await request<StationBoardResponse>(
+    `/api/station/${encodeURIComponent(stationCode)}/live?hours=${hours}`,
+    { signal: options.signal, retries: options.retries ?? 1 },
+  );
   return data.data;
 }
 
@@ -251,19 +226,35 @@ export async function getTrainsBetween(
   trainType = "XXX",
   options: SearchOptions = {},
 ): Promise<BetweenResponse> {
-  const data = await request<BetweenResponse>(`/trains/between`, {
-    from,
-    to,
-    type: trainType,
-  }, { signal: options.signal, retries: options.retries ?? 1 });
+  const params = new URLSearchParams({ from, to, train_type: trainType });
+  const data = await request<BetweenResponse>(`/api/between?${params.toString()}`, {
+    signal: options.signal,
+    retries: options.retries ?? 1,
+  });
   return data.data;
 }
 
 export async function getPnrStatus(pnr: string, options: SearchOptions = {}): Promise<PnrResponse> {
-  const data = await request<PnrResponse>(`/pnr/${encodeURIComponent(pnr)}`, {}, {
+  const data = await request<PnrResponse>(`/api/pnr/${encodeURIComponent(pnr)}`, {
     signal: options.signal,
     retries: options.retries ?? 2,
     timeoutMs: 60000,
+  });
+  return data.data;
+}
+
+export async function getCoverage(options: SearchOptions = {}) {
+  const data = await request<CoverageResponse>(`/api/coverage`, {
+    signal: options.signal,
+    retries: options.retries ?? 1,
+  });
+  return data.data;
+}
+
+export async function getProviderHealth(options: SearchOptions = {}) {
+  const data = await request<ProviderHealthResponse>(`/api/provider/health`, {
+    signal: options.signal,
+    retries: options.retries ?? 1,
   });
   return data.data;
 }

@@ -3,75 +3,88 @@
 import { ArrowUpRight, Braces, TerminalSquare } from "lucide-react";
 import { PageHeader } from "@/components/section-heading";
 
-const RAIL_ENGINE_BASE = "https://railway-engine.apkscope.workers.dev/v1";
-
 const ENDPOINTS = [
   {
     method: "GET",
-    path: "/trains/search?q=rajdhani",
+    path: "/api/search?q=rajdhani",
     description: "Find trains by number, name or keyword.",
   },
   {
     method: "GET",
-    path: "/train/{number}/schedule?date=2026-11-02",
+    path: "/api/train/{number}",
+    description: "Train details plus recent and upcoming runs.",
+  },
+  {
+    method: "GET",
+    path: "/api/train/{number}/schedule?date=YYYY-MM-DD",
     description: "Full timetable: stops, times, distance, halt, platform.",
   },
   {
     method: "GET",
-    path: "/train/{number}/route?date=2026-11-02",
+    path: "/api/train/{number}/route?date=YYYY-MM-DD",
     description: "Station-by-station route with scheduled/actual times.",
   },
   {
     method: "GET",
-    path: "/train/{number}/status?date=2026-11-02",
+    path: "/api/train/{number}/live?date=YYYY-MM-DD",
     description: "Live position, delay, GPS, freshness, confidence, timeline.",
   },
   {
     method: "GET",
-    path: "/train/{number}/coaches",
+    path: "/api/train/{number}/coaches",
     description: "Coach composition with position, type, class, berth layout.",
   },
   {
     method: "GET",
-    path: "/train/{number}/fare?date=2026-11-02&class=3A&quota=GN",
+    path: "/api/train/{number}/fare?date=YYYY-MM-DD&class=3A&quota=GN",
     description: "Itemised fare breakdown (base, reservation, superfast, GST, tatkal).",
   },
   {
     method: "GET",
-    path: "/train/{number}/platforms",
+    path: "/api/train/{number}/platforms",
     description: "Platform numbers per station with confidence scores.",
   },
   {
     method: "GET",
-    path: "/station/{code}",
+    path: "/api/station/{code}",
     description: "Station details: name, aliases, coordinates, state, zone, division.",
   },
   {
     method: "GET",
-    path: "/station/{code}/live?hours=2",
+    path: "/api/station/{code}/live?hours=2",
     description: "Station board: arrivals/departures with expected times & delays.",
   },
   {
     method: "GET",
-    path: "/stations/search?q=delhi",
+    path: "/api/stations/search?q=delhi",
     description: "Search stations by name or code prefix.",
   },
   {
     method: "GET",
-    path: "/trains/between?from=NDLS&to=MMCT&type=XXX",
+    path: "/api/between?from=NDLS&to=MMCT&train_type=XXX",
     description: "Direct trains between two stations with times, classes, days.",
   },
   {
     method: "GET",
-    path: "/pnr/{10-digit-pnr}",
+    path: "/api/pnr/{10-digit-pnr}",
     description: "PNR status with passenger details, coach, berth, chart status.",
+  },
+  {
+    method: "GET",
+    path: "/api/coverage",
+    description: "Data coverage report with verification details.",
+  },
+  {
+    method: "GET",
+    path: "/api/provider/health",
+    description: "Upstream provider health status and latency.",
   },
 ];
 
 const ENVELOPE_EXAMPLE = `{
-  "status": "SUCCESS" | "STALE_DATA",
-  "data": { ... },
-  "meta": { "freshness": { "state": "LIVE", "confidence": "HIGH" } }
+  "ok": true,
+  "cached": false,
+  "data": { ... }
 }`;
 
 export default function ApiDocsPage() {
@@ -80,24 +93,24 @@ export default function ApiDocsPage() {
       <PageHeader
         eyebrow="Developers"
         title="The API behind RailLens."
-        description="Every screen in this app is powered by RailEngine — a free, developer-first Indian Railways API with honest freshness metadata."
+        description="Every screen in this app is powered by our FastAPI backend which proxies RailEngine — adding caching, key protection, and a consistent response envelope."
       >
         <div className="mt-7 flex flex-wrap gap-2">
           <a
-            href={`https://railengine.vercel.app/docs`}
+            href={`/docs`}
             target="_blank"
             rel="noreferrer"
             className="btn-primary !px-4 !py-2.5 !text-xs"
           >
-            <TerminalSquare className="h-4 w-4" /> Open RailEngine Docs
+            <TerminalSquare className="h-4 w-4" /> Open Swagger UI
           </a>
           <a
-            href={`https://railengine.vercel.app/docs/live-status`}
+            href={`/openapi.json`}
             target="_blank"
             rel="noreferrer"
             className="btn-ghost !py-2.5 !text-xs"
           >
-            <Braces className="h-3.5 w-3.5" /> Live Status Reference
+            <Braces className="h-3.5 w-3.5" /> OpenAPI Schema
           </a>
         </div>
       </PageHeader>
@@ -106,8 +119,8 @@ export default function ApiDocsPage() {
         <div className="glass overflow-hidden rounded-2xl">
           <div className="border-b border-white/[0.06] px-5 py-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="font-display text-sm font-semibold text-white">RailEngine Endpoints</h2>
-              <span className="font-mono text-[11px] text-white/35">{RAIL_ENGINE_BASE}</span>
+              <h2 className="font-display text-sm font-semibold text-white">Backend Endpoints</h2>
+              <span className="font-mono text-[11px] text-white/35">/api/...</span>
             </div>
           </div>
           <ul className="divide-y divide-white/[0.055]">
@@ -133,10 +146,14 @@ export default function ApiDocsPage() {
           <div className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-5">
             <h3 className="text-[13px] font-semibold text-white">Response envelope</h3>
             <pre className="mt-3 overflow-x-auto rounded-xl bg-ink-950/70 p-4 font-mono text-[11px] leading-relaxed text-white/60">
-              {ENVELOPE_EXAMPLE}
+{`{
+  "ok": true,
+  "cached": false,
+  "data": { ... }
+}`}
             </pre>
             <p className="mt-3 text-[11px] leading-relaxed text-white/40">
-              Errors return <code className="font-mono">status: "ERROR"</code> with an
+              Errors use the same shape with <code className="font-mono">ok: false</code> and an
               <code className="font-mono">error.code</code> you can branch on.
             </p>
           </div>
@@ -145,9 +162,10 @@ export default function ApiDocsPage() {
             <h3 className="text-[13px] font-semibold text-white">Notes</h3>
             <ul className="mt-3 space-y-2 text-[11.5px] leading-relaxed text-white/40">
               <li>• Live endpoint takes the train&apos;s origin start date, not today.</li>
-              <li>• All endpoints require <code className="font-mono">x-api-key</code> header.</li>
-              <li>• Freshness metadata: LIVE/RECENT/STALE + HIGH/MEDIUM/LOW confidence.</li>
-              <li>• Rate limit: 60 req/min. Cache responses client-side.</li>
+              <li>• Backend caches responses: live 45s, station board 60s, schedules 6h, search 1h.</li>
+              <li>• API key is kept server-side; frontend calls backend without auth.</li>
+              <li>• Freshness metadata: LIVE/RECENT/STALE + HIGH/MEDIUM/LOW confidence (from RailEngine).</li>
+              <li>• Rate limit: 60 req/min upstream; backend absorbs spikes via cache.</li>
               <li>• Unofficial upstream; no SLA, no commercial use.</li>
             </ul>
             <a

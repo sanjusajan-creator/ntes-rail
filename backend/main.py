@@ -1,12 +1,10 @@
-"""RailLens API - a free REST layer over RailEngine's Indian Railways API.
+"""RailLens API - FastAPI proxy for RailEngine with caching and key protection.
 
 Deploy targets:
   * Render.com  (free web service)
   * Fly.io      (free allowance)
   * Koyeb       (free instance)
   * Any VPS     (Dockerfile included)
-
-Upstream: https://railengine.vercel.app (requires x-api-key)
 """
 from __future__ import annotations
 
@@ -23,37 +21,36 @@ from fastapi.responses import JSONResponse
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("raillens")
 
-APP_VERSION = "3.0.0"
+APP_VERSION = "4.0.0"
 
 # Upstream RailEngine API
-UPSTREAM_BASE = "https://railengine.vercel.app/v1"
-# API key - in production set via env var
+UPSTREAM_BASE = "https://railway-engine.apkscope.workers.dev/v1"
 RAIL_ENGINE_API_KEY = os.getenv("RAIL_ENGINE_API_KEY", "")
 
 # Cache TTLs (seconds)
 CACHE_TTLS = {
-    "search": 3600,           # 1 hour
-    "train_info": 21600,      # 6 hours
-    "schedule": 21600,        # 6 hours
-    "live": 45,               # 45 seconds
-    "route": 21600,           # 6 hours
-    "station_board": 60,      # 1 minute
-    "station_search": 3600,   # 1 hour
-    "station_by_code": 86400, # 24 hours
-    "between": 21600,         # 6 hours
-    "pnr": 0,                 # no cache for PNR
-    "coach": 21600,           # 6 hours
-    "fare": 3600,             # 1 hour
-    "platforms": 21600,       # 6 hours
-    "health": 60,             # 1 minute
-    "version": 3600,          # 1 hour
-    "coverage": 86400,        # 24 hours
-    "provider_health": 300,   # 5 minutes
+    "search": 3600,
+    "train_info": 21600,
+    "schedule": 21600,
+    "route": 21600,
+    "live": 45,
+    "coaches": 21600,
+    "fare": 3600,
+    "platforms": 21600,
+    "station_by_code": 86400,
+    "station_search": 3600,
+    "station_board": 60,
+    "between": 21600,
+    "pnr": 0,
+    "health": 60,
+    "version": 3600,
+    "coverage": 86400,
+    "provider_health": 300,
 }
 
 app = FastAPI(
     title="RailLens API",
-    description="REST API for Indian Railways live running status, schedules, routes, PNR, fares, coach composition and more.",
+    description="FastAPI proxy for RailEngine Indian Railways API with caching and key protection.",
     version=APP_VERSION,
 )
 
@@ -97,7 +94,18 @@ async def upstream_get(path: str, params: dict | None = None) -> dict:
         resp = await client.get(url, params=params, headers=headers)
         if resp.status_code >= 400:
             raise HTTPException(status_code=resp.status_code, detail=f"Upstream error: {resp.text}")
-        return resp.json()
+        data = resp.json()
+        # RailEngine wraps responses in {status, data, error, meta}
+        # Normalize to our envelope
+        if isinstance(data, dict) and "status" in data:
+            if data.get("status") in ("SUCCESS", "STALE_DATA"):
+                return {"ok": True, "data": data.get("data"), "meta": data.get("meta")}
+            else:
+                raise HTTPException(
+                    status_code=resp.status_code,
+                    detail=data.get("error", {}).get("message", "Upstream error"),
+                )
+        return {"ok": True, "data": data}
 
 
 def cached(key: str, ttl: int, fetcher):
@@ -245,7 +253,6 @@ async def train_info(train_no: str):
         return ok(cached_val, True)
 
     try:
-        # Get schedule (which includes train info) - no date needed for basic info
         data = await upstream_get(f"/train/{number}/schedule")
         cache_set(key, data, CACHE_TTLS["train_info"])
         return ok(data, False)
@@ -490,7 +497,6 @@ async def trains_between(
 async def pnr_status(pnr: str):
     pnr_clean = validate_pnr(pnr)
 
-    # No caching for PNR
     try:
         data = await upstream_get(f"/pnr/{pnr_clean}")
         return ok(data, False)
